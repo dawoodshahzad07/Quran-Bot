@@ -6,8 +6,7 @@ import difflib
 import Levenshtein
 
 # The reference surah
-REFERENCE_SURAH = "انا اعطيناك الكوثر فصل لربك وانحر ان شانئك هو الابتر"
-
+REFERENCE_SURAH = "بسم الله الرحمن الرحيم إنا أعطيناك الكوثر فصل لربك وانحر إن شانئك هو الابتر"
 # Define a dictionary with common transcription errors and their corrections
 import re
 
@@ -124,24 +123,67 @@ def correct_transcription(transcribed_text):
 
 import whisper
 import os
+import requests
 
+api_token = os.getenv("HUGGINGFACE_API_TOKEN")
+api_url = "https://api-inference.huggingface.co/models/openai/whisper-large-v3-turbo"
 
+headers = {
+    "Authorization": f"Bearer {api_token}"
+}
 
-def transcribe_audio(file_path, model_name="medium"):
-    """Transcribes the given audio file and returns the transcribed text using OpenAI Whisper."""
+def transcribe_audio(file_path):
+    """
+    Transcribes Arabic audio using the Hugging Face Inference API and returns text.
+    
+    Args:
+        file_path (str): Path to the audio file.
+    Returns:
+        str: Transcribed text in Arabic or error message.
+    """
     try:
-        # Since the model is in the current directory, no need to specify a separate models folder
-        model_path = f"{model_name}.pt"
+        # Open the audio file in binary mode
+        with open(file_path, "rb") as f:
+            audio_data = f.read()
 
-        # Load the Whisper model from the current directory
-        model = whisper.load_model(model_path)
-        
-        # Transcribe audio using Whisper
-        result = model.transcribe(file_path, language='ar')
+        # Send the file to the Hugging Face Inference API for Arabic transcription
+        response = requests.post(api_url, headers=headers, data=audio_data, params={"language": "ar"})
 
-        return result['text'].strip()  # Return the transcribed text
+        # Check for a successful response
+        if response.status_code == 200:
+            result = response.json()
+            if 'text' in result:
+                transcribed_text = result['text'].strip()
+                
+                # Check if the transcription is in Arabic
+                if not is_arabic(transcribed_text):
+                    return "خطأ: لم يتم الكشف عن اللغة العربية في النص."  # Error if not Arabic
+                
+                return transcribed_text  # Return the transcribed text
+            else:
+                return "خطأ: لم يتم العثور على نص في الاستجابة."  # No text found in the response
+        else:
+            return f"خطأ: {response.status_code}, {response.text}"  # Error message in Arabic
+    except FileNotFoundError:
+        return "حدث خطأ: الملف غير موجود."  # Specific error for file not found
+    except requests.exceptions.RequestException as req_err:
+        return f"حدث خطأ في الطلب: {str(req_err)}"  # Error related to the request
     except Exception as e:
-        return f"حدث خطأ: {str(e)}"
+        return f"حدث خطأ: {str(e)}"  # General error message in Arabic
+
+def is_arabic(text):
+    """
+    Checks if the given text contains Arabic characters.
+    
+    Args:
+        text (str): The text to check.
+    Returns:
+        bool: True if the text is in Arabic, False otherwise.
+    """
+    # A simple check to see if there are Arabic characters in the text
+    return any('\u0600' <= char <= '\u06FF' for char in text)
+
+
 
 
 def compare_texts(reference, transcription):
@@ -236,7 +278,7 @@ def highlight_correction(reference, transcription):
         else:
             # Leave the rest white
             unmatched_part = " ".join(reference.split()[i1:i2])
-            highlighted_output.append(f"<span style='color:white;'>{unmatched_part}</span>")
+            highlighted_output.append(f"<span style='color:red;'>{unmatched_part}</span>")
 
     return " ".join(highlighted_output)
 
@@ -252,7 +294,6 @@ def main():
         """
         <style>
             @import url('https://fonts.googleapis.com/css2?family=Amiri&display=swap');
-
             .arabic-text {
                 font-family: 'Amiri', serif;  /* Use a nice Arabic font */
                 font-size: 28px;              /* Increased font size for better readability */
@@ -275,7 +316,7 @@ def main():
         # Create a button to proceed with transcription
         if st.button("Proceed Audio"):
             # Transcribe the audio file
-            transcribed_text = transcribe_audio("D:\\vscode\\quran-bot\\quran-bot\\temp_audio_file")
+            transcribed_text = transcribe_audio("temp_audio_file")
             
             # Correct the transcribed text using the preprocessing function
             corrected_transcribed_text = correct_transcription(transcribed_text)
@@ -293,11 +334,13 @@ def main():
 # Display the original transcription section
 # Display the original transcription section
             st.header("Transcription")
+            st.write("transcription from the model")
             transcription_html = highlight_transcription(REFERENCE_SURAH, transcribed_text)
             st.markdown(f"<p class='arabic-text'>{transcription_html}</p>", unsafe_allow_html=True)
 
             # Display the corrected section with the original Surah
-            st.header("Correction")
+            st.header("Correct Surah")
+            st.write("green==correct, red==wrong or did'nt pronounced it correct")
             correction_html = highlight_correction(REFERENCE_SURAH, transcribed_text)
             st.markdown(f"<p class='arabic-text'>كيف تقولها: {correction_html}</p>", unsafe_allow_html=True)
 
